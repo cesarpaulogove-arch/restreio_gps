@@ -1,10 +1,10 @@
-'use client';
+'use client'
 
-import dynamic from 'next/dynamic';
+import dynamic from 'next/dynamic'
 
 import {
   useRastreamento,
-} from '@/hooks/useRastreamento';
+} from '@/hooks/useRastreamento'
 
 
 // =====================================================
@@ -12,7 +12,10 @@ import {
 // =====================================================
 
 const MapaRastreamento = dynamic(
-  () => import('@/components/MapaRastreamento'),
+  () =>
+    import(
+      '@/components/MapaRastreamento'
+    ),
   {
     ssr: false,
 
@@ -34,19 +37,21 @@ const MapaRastreamento = dynamic(
       </div>
     ),
   }
-);
+)
 
 
 // =====================================================
-// PÁGINA PRINCIPAL
+// PÁGINA
 // =====================================================
 
 export default function Home() {
 
   const {
     objetos,
+    areaPermitida,
     mqttOnline,
-  } = useRastreamento();
+    enviarSOS,
+  } = useRastreamento()
 
 
   // ===================================================
@@ -55,18 +60,59 @@ export default function Home() {
 
   const objetosOnline =
     objetos.filter(
-      objeto => objeto.online
-    ).length;
+      objeto =>
+        objeto.online === true
+    ).length
 
 
   const objetosOffline =
     objetos.filter(
-      objeto => !objeto.online
-    ).length;
+      objeto =>
+        objeto.online === false
+    ).length
+
+
+  const objetosSOS =
+    objetos.filter(
+      objeto =>
+        objeto.sos === true
+    ).length
+
+
+  // ===================================================
+  // ENVIAR SOS
+  // ===================================================
+  //
+  // IMPORTANTE:
+  //
+  // NÃO fazer:
+  //
+  // onClick={enviarSOS}
+  //
+  // porque o React passaria o evento HTML.
+  //
+  // Fazemos:
+  //
+  // onClick={() => enviarSOS(objeto.id)}
+  //
+  // ===================================================
+
+  const handleSOS = (
+    objetoId: string
+  ) => {
+
+    console.log(
+      'Botão SOS pressionado para:',
+      objetoId
+    )
+
+    enviarSOS(
+      objetoId
+    )
+  }
 
 
   return (
-
     <main
       className="
         flex
@@ -100,8 +146,6 @@ export default function Home() {
         "
       >
 
-        {/* TÍTULO */}
-
         <div className="min-w-0">
 
           <h1
@@ -129,7 +173,9 @@ export default function Home() {
         </div>
 
 
-        {/* STATUS MQTT */}
+        {/* =================================================
+            MQTT
+        ================================================= */}
 
         <div
           className="
@@ -161,11 +207,9 @@ export default function Home() {
               sm:text-sm
             "
           >
-
             {mqttOnline
               ? 'Online'
               : 'Offline'}
-
           </span>
 
         </div>
@@ -197,14 +241,19 @@ export default function Home() {
         >
 
           <MapaRastreamento
-            objetos={objetos}
+            objetos={
+              objetos
+            }
+            areaPermitida={
+              areaPermitida
+            }
           />
 
         </div>
 
 
         {/* =================================================
-            PAINEL DE OBJETOS
+            PAINEL
         ================================================= */}
 
         <aside
@@ -216,7 +265,7 @@ export default function Home() {
             left-2
             right-2
 
-            max-h-[45vh]
+            max-h-[55vh]
 
             overflow-hidden
 
@@ -286,8 +335,6 @@ export default function Home() {
             </div>
 
 
-            {/* TOTAL */}
-
             <div
               className="
                 rounded-full
@@ -298,9 +345,7 @@ export default function Home() {
                 text-slate-300
               "
             >
-
               {objetos.length}
-
             </div>
 
           </div>
@@ -312,10 +357,9 @@ export default function Home() {
 
           <div
             className="
-              max-h-[calc(45vh-60px)]
+              max-h-[calc(55vh-60px)]
               overflow-y-auto
               p-2
-
               sm:max-h-[calc(100vh-15rem)]
               sm:p-3
             "
@@ -329,7 +373,7 @@ export default function Home() {
               className="
                 mb-3
                 grid
-                grid-cols-3
+                grid-cols-4
                 gap-2
               "
             >
@@ -341,13 +385,12 @@ export default function Home() {
                   rounded-lg
                   bg-slate-800
                   p-2
-                  sm:p-3
                 "
               >
 
                 <div
                   className="
-                    text-[10px]
+                    text-[9px]
                     text-slate-400
                   "
                 >
@@ -358,7 +401,6 @@ export default function Home() {
                   className="
                     text-lg
                     font-bold
-                    sm:text-xl
                   "
                 >
                   {objetos.length}
@@ -374,13 +416,12 @@ export default function Home() {
                   rounded-lg
                   bg-slate-800
                   p-2
-                  sm:p-3
                 "
               >
 
                 <div
                   className="
-                    text-[10px]
+                    text-[9px]
                     text-slate-400
                   "
                 >
@@ -392,7 +433,6 @@ export default function Home() {
                     text-lg
                     font-bold
                     text-green-400
-                    sm:text-xl
                   "
                 >
                   {objetosOnline}
@@ -408,13 +448,12 @@ export default function Home() {
                   rounded-lg
                   bg-slate-800
                   p-2
-                  sm:p-3
                 "
               >
 
                 <div
                   className="
-                    text-[10px]
+                    text-[9px]
                     text-slate-400
                   "
                 >
@@ -426,7 +465,6 @@ export default function Home() {
                     text-lg
                     font-bold
                     text-red-400
-                    sm:text-xl
                   "
                 >
                   {objetosOffline}
@@ -434,7 +472,98 @@ export default function Home() {
 
               </div>
 
+
+              {/* SOS */}
+
+              <div
+                className={`
+                  rounded-lg
+                  p-2
+                  ${
+                    objetosSOS > 0
+                      ? 'bg-red-600'
+                      : 'bg-slate-800'
+                  }
+                `}
+              >
+
+                <div
+                  className="
+                    text-[9px]
+                    text-slate-200
+                  "
+                >
+                  SOS
+                </div>
+
+                <div
+                  className="
+                    text-lg
+                    font-bold
+                  "
+                >
+                  {objetosSOS}
+                </div>
+
+              </div>
+
             </div>
+
+
+            {/* =================================================
+                ALERTA SOS
+            ================================================= */}
+
+            {objetosSOS > 0 && (
+
+              <div
+                className="
+                  mb-3
+                  animate-pulse
+                  rounded-xl
+                  border
+                  border-red-500
+                  bg-red-950
+                  p-3
+                "
+              >
+
+                <div
+                  className="
+                    flex
+                    items-center
+                    gap-2
+                    font-bold
+                    text-red-400
+                  "
+                >
+
+                  <span className="text-xl">
+                    🚨
+                  </span>
+
+                  EMERGÊNCIA SOS
+
+                </div>
+
+
+                <div
+                  className="
+                    mt-1
+                    text-xs
+                    text-red-200
+                  "
+                >
+
+                  {objetosSOS === 1
+                    ? 'Um objeto enviou um alerta SOS.'
+                    : `${objetosSOS} objetos enviaram alertas SOS.`}
+
+                </div>
+
+              </div>
+
+            )}
 
 
             {/* =================================================
@@ -452,7 +581,12 @@ export default function Home() {
                 "
               >
 
-                <div className="mb-2 text-2xl">
+                <div
+                  className="
+                    mb-2
+                    text-2xl
+                  "
+                >
                   📡
                 </div>
 
@@ -481,7 +615,7 @@ export default function Home() {
 
 
             {/* =================================================
-                LISTA DOS OBJETOS
+                OBJETOS
             ================================================= */}
 
             <div
@@ -494,19 +628,66 @@ export default function Home() {
                 objeto => (
 
                   <div
-                    key={objeto.id}
-                    className="
+                    key={
+                      objeto.id
+                    }
+                    className={`
                       rounded-xl
                       border
-                      border-slate-700
-                      bg-slate-800
                       p-3
-                    "
+                      ${
+                        objeto.sos
+                          ? `
+                            border-red-500
+                            bg-red-950/80
+                          `
+                          : `
+                            border-slate-700
+                            bg-slate-800
+                          `
+                      }
+                    `}
                   >
 
-                    {/* =================================================
-                        NOME E STATUS
-                    ================================================= */}
+                    {/* =========================================
+                        SOS ATIVO
+                    ========================================= */}
+
+                    {objeto.sos && (
+
+                      <div
+                        className="
+                          mb-3
+                          flex
+                          items-center
+                          gap-2
+                          rounded-lg
+                          bg-red-600
+                          px-3
+                          py-2
+                          font-bold
+                          text-white
+                        "
+                      >
+
+                        <span
+                          className="
+                            animate-pulse
+                          "
+                        >
+                          🚨
+                        </span>
+
+                        SOS ATIVO
+
+                      </div>
+
+                    )}
+
+
+                    {/* =========================================
+                        NOME / STATUS
+                    ========================================= */}
 
                     <div
                       className="
@@ -516,8 +697,6 @@ export default function Home() {
                         gap-2
                       "
                     >
-
-                      {/* NOME */}
 
                       <div
                         className="
@@ -537,7 +716,6 @@ export default function Home() {
 
                         <div
                           className="
-                            truncate
                             text-[9px]
                             text-slate-500
                           "
@@ -547,8 +725,6 @@ export default function Home() {
 
                       </div>
 
-
-                      {/* STATUS */}
 
                       <div
                         className="
@@ -578,11 +754,9 @@ export default function Home() {
                             text-slate-400
                           "
                         >
-
                           {objeto.online
                             ? 'Online'
                             : 'Offline'}
-
                         </span>
 
                       </div>
@@ -590,9 +764,9 @@ export default function Home() {
                     </div>
 
 
-                    {/* =================================================
-                        DADOS DO OBJETO
-                    ================================================= */}
+                    {/* =========================================
+                        DADOS
+                    ========================================= */}
 
                     <div
                       className="
@@ -606,8 +780,6 @@ export default function Home() {
                       "
                     >
 
-                      {/* VELOCIDADE */}
-
                       <div>
 
                         <span
@@ -618,20 +790,14 @@ export default function Home() {
                           Velocidade
                         </span>
 
-                        <div
-                          className="
-                            text-white
-                          "
-                        >
-                          {objeto.velocidade.toFixed(1)}
-                          {' '}
-                          km/h
+                        <div>
+                          {Number(
+                            objeto.velocidade
+                          ).toFixed(1)} km/h
                         </div>
 
                       </div>
 
-
-                      {/* BATERIA */}
 
                       <div>
 
@@ -643,18 +809,12 @@ export default function Home() {
                           Bateria
                         </span>
 
-                        <div
-                          className="
-                            text-white
-                          "
-                        >
+                        <div>
                           {objeto.bateria}%
                         </div>
 
                       </div>
 
-
-                      {/* LATITUDE */}
 
                       <div>
 
@@ -666,18 +826,14 @@ export default function Home() {
                           Latitude
                         </span>
 
-                        <div
-                          className="
-                            text-white
-                          "
-                        >
-                          {objeto.latitude.toFixed(5)}
+                        <div>
+                          {Number(
+                            objeto.latitude
+                          ).toFixed(5)}
                         </div>
 
                       </div>
 
-
-                      {/* LONGITUDE */}
 
                       <div>
 
@@ -689,18 +845,14 @@ export default function Home() {
                           Longitude
                         </span>
 
-                        <div
-                          className="
-                            text-white
-                          "
-                        >
-                          {objeto.longitude.toFixed(5)}
+                        <div>
+                          {Number(
+                            objeto.longitude
+                          ).toFixed(5)}
                         </div>
 
                       </div>
 
-
-                      {/* DIREÇÃO */}
 
                       <div>
 
@@ -712,18 +864,12 @@ export default function Home() {
                           Direção
                         </span>
 
-                        <div
-                          className="
-                            text-white
-                          "
-                        >
+                        <div>
                           {objeto.direcao}°
                         </div>
 
                       </div>
 
-
-                      {/* PRECISÃO */}
 
                       <div>
 
@@ -735,14 +881,8 @@ export default function Home() {
                           Precisão
                         </span>
 
-                        <div
-                          className="
-                            text-white
-                          "
-                        >
-                          {objeto.precisao}
-                          {' '}
-                          m
+                        <div>
+                          {objeto.precisao} m
                         </div>
 
                       </div>
@@ -750,9 +890,54 @@ export default function Home() {
                     </div>
 
 
-                    {/* =================================================
+                    {/* =========================================
+                        BOTÃO SOS
+                    ========================================= */}
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleSOS(
+                          objeto.id
+                        )
+                      }
+                      disabled={
+                        !mqttOnline
+                      }
+                      className={`
+                        mt-4
+                        w-full
+                        rounded-lg
+                        px-4
+                        py-3
+                        text-sm
+                        font-bold
+                        text-white
+                        transition
+                        active:scale-95
+                        ${
+                          mqttOnline
+                            ? `
+                              bg-red-600
+                              hover:bg-red-700
+                            `
+                            : `
+                              cursor-not-allowed
+                              bg-slate-700
+                              text-slate-400
+                            `
+                        }
+                      `}
+                    >
+
+                      🚨 ENVIAR SOS
+
+                    </button>
+
+
+                    {/* =========================================
                         ÚLTIMA ATUALIZAÇÃO
-                    ================================================= */}
+                    ========================================= */}
 
                     <div
                       className="
@@ -793,5 +978,5 @@ export default function Home() {
       </section>
 
     </main>
-  );
+  )
 }

@@ -5,27 +5,60 @@ import {
   TileLayer,
   Marker,
   Popup,
-  Tooltip,
+  Rectangle,
   useMap,
 } from 'react-leaflet'
 
 import L from 'leaflet'
-
-import {
-  useEffect,
-  useRef,
-} from 'react'
+import { useEffect, useRef } from 'react'
 
 import 'leaflet/dist/leaflet.css'
 
-import type {
-  ObjetoRastreado,
-} from '@/types/rastreamento'
 
+// =====================================================
+// TIPOS
+// =====================================================
+
+interface ObjetoRastreado {
+  id: string
+  nome: string
+
+  latitude: number
+  longitude: number
+
+  velocidade: number
+  direcao: number
+  bateria: number
+  precisao: number
+
+  limiteNorte: number
+  limiteSul: number
+  limiteOeste: number
+  limiteLeste: number
+
+  dentroDaArea: boolean
+
+  sos: boolean
+
+  timestamp: number
+
+  online: boolean
+
+  ultimaAtualizacao: string
+}
+
+
+interface AreaPermitida {
+  norte: number
+  sul: number
+  oeste: number
+  leste: number
+}
 
 
 interface Props {
   objetos: ObjetoRastreado[]
+  areaPermitida: AreaPermitida | null
 }
 
 
@@ -33,32 +66,81 @@ interface Props {
 // ÍCONE DO OBJETO
 // =====================================================
 
-const iconeObjeto = new L.Icon({
+function criarIcone(
+  objeto: ObjetoRastreado
+) {
 
-  iconUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  let cor = '#64748b'
 
-  iconRetinaUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  if (objeto.online) {
+    cor = '#22c55e'
+  }
 
-  shadowUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  if (objeto.sos) {
+    cor = '#ef4444'
+  }
 
-  iconSize: [25, 41],
 
-  iconAnchor: [12, 41],
+  return L.divIcon({
 
-  popupAnchor: [1, -34],
+    className: '',
 
-  shadowSize: [41, 41],
-})
+    html: `
+      <div
+        style="
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          background: ${cor};
+          border: 3px solid white;
+          box-shadow: 0 3px 12px rgba(0,0,0,.45);
+
+          display: flex;
+          align-items: center;
+          justify-content: center;
+
+          color: white;
+          font-size: 18px;
+          font-weight: bold;
+        "
+      >
+        ${objeto.sos ? '!' : '●'}
+      </div>
+    `,
+
+    iconSize: [
+      40,
+      40,
+    ],
+
+    iconAnchor: [
+      20,
+      20,
+    ],
+
+    popupAnchor: [
+      0,
+      -20,
+    ],
+
+  })
+
+}
 
 
 // =====================================================
-// CENTRALIZAR MAPA
+// MAPA DINÂMICO
+// =====================================================
+//
+// O mapa acompanha o objeto automaticamente.
+//
+// IMPORTANTE:
+// O zoom atual NÃO é alterado.
+// Apenas o centro do mapa acompanha o objeto.
+//
 // =====================================================
 
-function AtualizadorCamera({
+function AcompanharObjeto({
   objetos,
 }: {
   objetos: ObjetoRastreado[]
@@ -66,216 +148,631 @@ function AtualizadorCamera({
 
   const map = useMap()
 
-  const jaCentralizou =
-    useRef(false)
+
+  const ultimoObjetoRef =
+    useRef<{
+      id: string
+      latitude: number
+      longitude: number
+    } | null>(null)
 
 
   useEffect(() => {
 
-    if (jaCentralizou.current) {
-      return
-    }
-
-    const ativos =
-      objetos.filter(
-        objeto => objeto.online
-      )
-
-
-    if (ativos.length === 0) {
+    if (objetos.length === 0) {
       return
     }
 
 
-    const bounds =
-      L.latLngBounds(
-        ativos.map(
-          objeto => [
-            objeto.latitude,
-            objeto.longitude,
-          ] as [number, number]
-        )
+    // =================================================
+    // ESCOLHER OBJETO
+    // =================================================
+    //
+    // Primeiro procura um objeto online.
+    //
+    // Se existir SOS, dá prioridade ao SOS.
+    //
+    // =================================================
+
+    const objetoSOS =
+      objetos.find(
+        objeto =>
+          objeto.sos &&
+          objeto.online
       )
 
 
-    map.fitBounds(
-      bounds,
+    const objetoOnline =
+      objetos.find(
+        objeto =>
+          objeto.online
+      )
+
+
+    const objeto =
+      objetoSOS ||
+      objetoOnline ||
+      objetos[0]
+
+
+    if (!objeto) {
+      return
+    }
+
+
+    // =================================================
+    // VERIFICAR SE REALMENTE MUDOU
+    // =================================================
+
+    const ultimo =
+      ultimoObjetoRef.current
+
+
+    if (
+      ultimo &&
+      ultimo.id === objeto.id &&
+      ultimo.latitude === objeto.latitude &&
+      ultimo.longitude === objeto.longitude
+    ) {
+
+      return
+
+    }
+
+
+    ultimoObjetoRef.current = {
+
+      id:
+        objeto.id,
+
+      latitude:
+        objeto.latitude,
+
+      longitude:
+        objeto.longitude,
+
+    }
+
+
+    // =================================================
+    // MANTER O ZOOM ATUAL
+    // =================================================
+
+    const zoomAtual =
+      map.getZoom()
+
+
+    // =================================================
+    // NOVA POSIÇÃO
+    // =================================================
+
+    const novaPosicao =
+      L.latLng(
+        objeto.latitude,
+        objeto.longitude
+      )
+
+
+    // =================================================
+    // ACOMPANHAR OBJETO
+    // =================================================
+
+    map.setView(
+      novaPosicao,
+      zoomAtual,
       {
-        padding: [60, 60],
-        maxZoom: 15,
         animate: true,
       }
     )
 
 
-    jaCentralizou.current = true
-
-  }, [map, objetos])
+  }, [
+    objetos,
+    map,
+  ])
 
 
   return null
+
 }
 
 
 // =====================================================
-// COMPONENTE PRINCIPAL
+// ÁREA PERMITIDA
 // =====================================================
 
-export default function MapaRastreamento({
-  objetos,
-}: Props) {
+function AreaMapa({
+  areaPermitida,
+}: {
+  areaPermitida: AreaPermitida | null
+}) {
+
+  if (!areaPermitida) {
+    return null
+  }
 
 
-  const centroInicial:
-    [number, number] = [
-      -25.9653,
-      32.5892,
-    ]
+  const bounds: [
+    [number, number],
+    [number, number]
+  ] = [
+
+    [
+      areaPermitida.sul,
+      areaPermitida.oeste,
+    ],
+
+    [
+      areaPermitida.norte,
+      areaPermitida.leste,
+    ],
+
+  ]
 
 
   return (
 
-    <MapContainer
+    <Rectangle
 
-      center={centroInicial}
+      bounds={
+        bounds
+      }
 
-      zoom={13}
+      pathOptions={{
 
-      scrollWheelZoom={true}
+        // =============================================
+        // LINHA DA ÁREA
+        // =============================================
 
-      className="w-full h-full z-0"
+        color:
+          '#22c55e',
 
+        weight:
+          6,
+
+        opacity:
+          1,
+
+        // =============================================
+        // SEM TRACEJADO
+        // =============================================
+
+        dashArray:
+          undefined,
+
+        // =============================================
+        // PREENCHIMENTO
+        // =============================================
+
+        fillColor:
+          '#22c55e',
+
+        fillOpacity:
+          0.05,
+
+      }}
+
+    />
+
+  )
+
+}
+
+
+// =====================================================
+// MAPA
+// =====================================================
+
+export default function MapaRastreamento({
+  objetos,
+  areaPermitida,
+}: Props) {
+
+
+  // ===================================================
+  // POSIÇÃO INICIAL
+  // ===================================================
+
+  const centroInicial: [
+    number,
+    number
+  ] = [
+
+    -25.965300,
+
+    32.589200,
+
+  ]
+
+
+  return (
+
+    <div
+      className="
+        h-full
+        w-full
+        overflow-hidden
+        bg-slate-950
+      "
     >
 
-      {/* ==============================================
-          MAPA
-      ============================================== */}
+      <MapContainer
 
-      <TileLayer
+        center={
+          centroInicial
+        }
 
-        attribution="
-          © OpenStreetMap
-          © CARTO
+        zoom={17}
+
+        minZoom={13}
+
+        maxZoom={20}
+
+        scrollWheelZoom={true}
+
+        zoomControl={true}
+
+        className="
+          h-full
+          w-full
         "
 
-        url="
-          https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png
-        "
+      >
 
-      />
+        {/* =================================================
+            MAPA
+        ================================================= */}
+
+        <TileLayer
+
+          attribution="
+            &copy; OpenStreetMap contributors
+          "
+
+          url="
+            https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
+          "
+
+        />
 
 
-      {/* ==============================================
-          OBJETOS
-      ============================================== */}
+        {/* =================================================
+            ACOMPANHAR OBJETO
+        ================================================= */}
 
-      {objetos
-        .filter(
-          objeto =>
-            objeto.online
-        )
-        .map(
+        <AcompanharObjeto
+
+          objetos={
+            objetos
+          }
+
+        />
+
+
+        {/* =================================================
+            ÁREA PERMITIDA
+        ================================================= */}
+
+        <AreaMapa
+
+          areaPermitida={
+            areaPermitida
+          }
+
+        />
+
+
+        {/* =================================================
+            OBJETOS
+        ================================================= */}
+
+        {objetos.map(
           objeto => (
 
             <Marker
 
-              key={objeto.id}
+              key={
+                objeto.id
+              }
 
               position={[
                 objeto.latitude,
                 objeto.longitude,
               ]}
 
-              icon={iconeObjeto}
+              icon={
+                criarIcone(
+                  objeto
+                )
+              }
 
             >
-
-              {/* ========================================
-                  IDENTIFICAÇÃO
-              ======================================== */}
-
-              <Tooltip
-                permanent
-                direction="top"
-                offset={[
-                  0,
-                  -28,
-                ]}
-              >
-
-                📍 {objeto.nome}
-
-              </Tooltip>
-
-
-              {/* ========================================
-                  INFORMAÇÕES
-              ======================================== */}
 
               <Popup>
 
                 <div
-                  style={{
-                    minWidth: '180px',
-                  }}
+                  className="
+                    min-w-[220px]
+                    text-sm
+                  "
                 >
 
-                  <strong>
+                  {/* =====================================
+                      NOME
+                  ===================================== */}
+
+                  <div
+                    className="
+                      mb-1
+                      text-base
+                      font-bold
+                    "
+                  >
+
                     {objeto.nome}
-                  </strong>
 
-                  <br />
+                  </div>
 
-                  ID:
-                  {' '}
-                  {objeto.id}
 
-                  <hr />
+                  {/* =====================================
+                      ID
+                  ===================================== */}
 
-                  🚗 Velocidade:
-                  {' '}
-                  {objeto.velocidade.toFixed(1)}
-                  {' '}
-                  km/h
+                  <div
+                    className="
+                      text-xs
+                      text-gray-500
+                    "
+                  >
 
-                  <br />
+                    ID: {objeto.id}
 
-                  🧭 Direção:
-                  {' '}
-                  {objeto.direcao}°
+                  </div>
 
-                  <br />
 
-                  📍 Latitude:
-                  {' '}
-                  {objeto.latitude.toFixed(6)}
+                  {/* =====================================
+                      STATUS
+                  ===================================== */}
 
-                  <br />
+                  <div
+                    className="
+                      mt-2
+                      flex
+                      items-center
+                      gap-2
+                    "
+                  >
 
-                  📍 Longitude:
-                  {' '}
-                  {objeto.longitude.toFixed(6)}
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: '50%',
+                        background:
+                          objeto.online
+                            ? '#22c55e'
+                            : '#ef4444',
+                      }}
+                    />
 
-                  <br />
+                    {objeto.online
+                      ? 'Online'
+                      : 'Offline'}
 
-                  🔋 Bateria:
-                  {' '}
-                  {objeto.bateria ?? '--'}%
+                  </div>
 
-                  <br />
 
-                  🎯 Precisão:
-                  {' '}
-                  {objeto.precisao ?? '--'}
-                  {' '}
-                  m
+                  {/* =====================================
+                      SOS
+                  ===================================== */}
 
-                  <br />
+                  {objeto.sos && (
 
-                  🕐 Última atualização:
-                  <br />
+                    <div
+                      className="
+                        mt-3
+                        rounded-lg
+                        bg-red-600
+                        px-3
+                        py-2
+                        text-center
+                        font-bold
+                        text-white
+                      "
+                    >
 
-                  {objeto.ultimaAtualizacao}
+                      🚨 SOS ATIVO
+
+                    </div>
+
+                  )}
+
+
+                  {/* =====================================
+                      DADOS
+                  ===================================== */}
+
+                  <div
+                    className="
+                      mt-3
+                      grid
+                      grid-cols-2
+                      gap-3
+                      text-xs
+                    "
+                  >
+
+                    <div>
+
+                      <div
+                        className="
+                          text-gray-500
+                        "
+                      >
+                        Velocidade
+                      </div>
+
+                      <strong>
+
+                        {objeto.velocidade.toFixed(1)}
+                        {' '}
+                        km/h
+
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <div
+                        className="
+                          text-gray-500
+                        "
+                      >
+                        Bateria
+                      </div>
+
+                      <strong>
+
+                        {objeto.bateria.toFixed(0)}%
+
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <div
+                        className="
+                          text-gray-500
+                        "
+                      >
+                        Latitude
+                      </div>
+
+                      <strong>
+
+                        {objeto.latitude.toFixed(6)}
+
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <div
+                        className="
+                          text-gray-500
+                        "
+                      >
+                        Longitude
+                      </div>
+
+                      <strong>
+
+                        {objeto.longitude.toFixed(6)}
+
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <div
+                        className="
+                          text-gray-500
+                        "
+                      >
+                        Direção
+                      </div>
+
+                      <strong>
+
+                        {objeto.direcao.toFixed(0)}°
+
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <div
+                        className="
+                          text-gray-500
+                        "
+                      >
+                        Precisão
+                      </div>
+
+                      <strong>
+
+                        {objeto.precisao.toFixed(1)}
+                        {' '}
+                        m
+
+                      </strong>
+
+                    </div>
+
+                  </div>
+
+
+                  {/* =====================================
+                      ÁREA
+                  ===================================== */}
+
+                  <div
+                    className={`
+                      mt-3
+                      rounded-lg
+                      px-3
+                      py-2
+                      text-center
+                      font-semibold
+
+                      ${
+                        objeto.dentroDaArea
+
+                          ? 'bg-green-100 text-green-700'
+
+                          : 'bg-red-100 text-red-700'
+                      }
+                    `}
+                  >
+
+                    {objeto.dentroDaArea
+
+                      ? '✓ Dentro da área'
+
+                      : '⚠ Fora da área'
+
+                    }
+
+                  </div>
+
+
+                  {/* =====================================
+                      ATUALIZAÇÃO
+                  ===================================== */}
+
+                  <div
+                    className="
+                      mt-2
+                      text-[10px]
+                      text-gray-400
+                    "
+                  >
+
+                    Atualizado:
+                    {' '}
+                    {objeto.ultimaAtualizacao}
+
+                  </div>
 
                 </div>
 
@@ -286,11 +783,10 @@ export default function MapaRastreamento({
           )
         )}
 
+      </MapContainer>
 
-      <AtualizadorCamera
-        objetos={objetos}
-      />
+    </div>
 
-    </MapContainer>
   )
+
 }

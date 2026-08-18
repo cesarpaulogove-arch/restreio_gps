@@ -1,589 +1,1189 @@
-'use client';
+'use client'
 
 import {
-  useState,
+  useCallback,
   useEffect,
   useRef,
-  useCallback,
-} from 'react';
+  useState,
+} from 'react'
 
 import mqtt, {
   MqttClient,
-} from 'mqtt';
-
-import type {
-  ObjetoRastreado,
-  EventLog,
-} from '@/types/rastreamento';
+  IClientOptions,
+} from 'mqtt'
 
 
 // =====================================================
-// HOOK DE RASTREAMENTO EM TEMPO REAL
+// TIPOS
+// =====================================================
+
+export interface ObjetoRastreado {
+  id: string
+  nome: string
+
+  latitude: number
+  longitude: number
+
+  velocidade: number
+  direcao: number
+  bateria: number
+  precisao: number
+
+  limiteNorte: number
+  limiteSul: number
+  limiteOeste: number
+  limiteLeste: number
+
+  dentroDaArea: boolean
+
+  sos: boolean
+
+  timestamp: number
+
+  online: boolean
+
+  ultimaAtualizacao: string
+}
+
+
+// =====================================================
+// ÁREA PERMITIDA
+// =====================================================
+
+export interface AreaPermitida {
+  norte: number
+  sul: number
+  oeste: number
+  leste: number
+}
+
+
+// =====================================================
+// CONFIGURAÇÃO MQTT
+// =====================================================
+//
+// Navegador:
+// MQTT via WebSocket.
+//
+// ESP32:
+// MQTT TCP na porta 1883.
+//
+// =====================================================
+
+const MQTT_URL =
+  'ws://broker.emqx.io:8083/mqtt'
+
+
+// =====================================================
+// TÓPICO DA TELEMETRIA
+// =====================================================
+
+const MQTT_TOPIC_TELEMETRIA =
+  'rastreamento/telemetria'
+
+
+// =====================================================
+// TÓPICO DOS COMANDOS
+// =====================================================
+//
+// O navegador envia comandos para o ESP32.
+//
+// Exemplo:
+//
+// {
+//   "id": "OBJ001",
+//   "sos": 1
+// }
+//
+// =====================================================
+
+const MQTT_TOPIC_COMANDO =
+  'rastreamento/comando'
+
+
+// =====================================================
+// TEMPO PARA CONSIDERAR OFFLINE
+// =====================================================
+
+const TEMPO_OFFLINE =
+  8000
+
+
+// =====================================================
+// HOOK
 // =====================================================
 
 export function useRastreamento() {
 
   // ===================================================
-  // ESTADO DOS OBJETOS
+  // OBJETOS
   // ===================================================
 
   const [
     objetos,
     setObjetos,
-  ] = useState<ObjetoRastreado[]>([]);
+  ] = useState<ObjetoRastreado[]>([])
 
 
   // ===================================================
-  // ESTADO DA CONEXÃO MQTT
+  // ÁREA
+  // ===================================================
+
+  const [
+    areaPermitida,
+    setAreaPermitida,
+  ] = useState<AreaPermitida | null>(null)
+
+
+  // ===================================================
+  // MQTT ONLINE
   // ===================================================
 
   const [
     mqttOnline,
     setMqttOnline,
-  ] = useState(false);
+  ] = useState(false)
 
 
   // ===================================================
-  // LOGS DO SISTEMA
+  // REFERÊNCIA MQTT
   // ===================================================
 
-  const [
-    logs,
-    setLogs,
-  ] = useState<EventLog[]>([]);
+  const mqttRef =
+    useRef<MqttClient | null>(null)
 
 
   // ===================================================
-  // REFERÊNCIA DO CLIENTE MQTT
+  // CONTROLE DE MONTAGEM
   // ===================================================
 
-  const clienteMqttRef =
-    useRef<MqttClient | null>(null);
-
-
-  // ===================================================
-  // CONFIGURAÇÃO MQTT
-  // ===================================================
-
-  const BROKER_URL =
-    'wss://broker.emqx.io:8084/mqtt';
-
-  const TOPICO_RASTREAMENTO =
-    'rastreamento/telemetria';
+  const montadoRef =
+    useRef(false)
 
 
   // ===================================================
-  // EMITIR LOG
+  // ÚLTIMA VEZ QUE CADA OBJETO FOI RECEBIDO
   // ===================================================
 
-  const emitirLog = useCallback(
-    (
-      type: EventLog['type'],
-      message: string
-    ) => {
-
-      const novoLog: EventLog = {
-
-        id:
-          Math.random()
-            .toString(36)
-            .substring(2, 9),
-
-        time:
-          new Date().toLocaleTimeString(
-            'pt-PT',
-            {
-              hour12: false,
-            }
-          ),
-
-        type,
-
-        message,
-      };
-
-
-      setLogs(
-        atual => [
-          novoLog,
-          ...atual,
-        ].slice(0, 10)
-      );
-
-    },
-    []
-  );
+  const ultimoRecebimentoRef =
+    useRef<Record<string, number>>({})
 
 
   // ===================================================
-  // CONEXÃO MQTT
+  // CONECTAR MQTT
   // ===================================================
 
   useEffect(() => {
 
-    emitirLog(
-      'info',
-      'A conectar ao Broker EMQX...'
-    );
+    montadoRef.current = true
 
 
     // =================================================
-    // CRIAR CLIENTE MQTT
+    // EVITAR CLIENTE DUPLICADO
     // =================================================
 
-    const clienteMqtt =
+    if (mqttRef.current) {
+
+      return
+
+    }
+
+
+    // =================================================
+    // CLIENT ID
+    // =================================================
+
+    const clientId =
+      `WEB_RASTREIO_${Date.now()}_${Math.random()
+        .toString(16)
+        .slice(2)}`
+
+
+    console.log(
+      '======================================'
+    )
+
+    console.log(
+      'INICIANDO MQTT'
+    )
+
+    console.log(
+      'URL:',
+      MQTT_URL
+    )
+
+    console.log(
+      'TELEMETRIA:',
+      MQTT_TOPIC_TELEMETRIA
+    )
+
+    console.log(
+      'COMANDO:',
+      MQTT_TOPIC_COMANDO
+    )
+
+    console.log(
+      'CLIENT ID:',
+      clientId
+    )
+
+    console.log(
+      '======================================'
+    )
+
+
+    // =================================================
+    // OPÇÕES MQTT
+    // =================================================
+
+    const options: IClientOptions = {
+
+      clientId,
+
+      clean: true,
+
+      connectTimeout:
+        15000,
+
+      reconnectPeriod:
+        3000,
+
+      keepalive:
+        30,
+
+      protocolVersion:
+        4,
+
+      resubscribe:
+        true,
+
+    }
+
+
+    // =================================================
+    // CONECTAR
+    // =================================================
+
+    const client =
       mqtt.connect(
-        BROKER_URL,
-        {
-
-          clientId:
-            `nextjs_rastreio_${Math.random()
-              .toString(16)
-              .substring(2, 8)}`,
-
-          clean: true,
-
-          connectTimeout: 4000,
-
-          reconnectPeriod: 1000,
-
-        }
-      );
+        MQTT_URL,
+        options
+      )
 
 
-    clienteMqttRef.current =
-      clienteMqtt;
+    mqttRef.current =
+      client
 
 
     // =================================================
-    // MQTT CONECTADO
+    // CONNECT
     // =================================================
 
-    clienteMqtt.on(
+    client.on(
       'connect',
       () => {
 
-        setMqttOnline(true);
+        if (
+          !montadoRef.current
+        ) {
+
+          return
+
+        }
 
 
-        emitirLog(
-          'success',
-          'Ligado ao EMQX via WebSocket.'
-        );
+        console.log(
+          'MQTT conectado'
+        )
+
+
+        setMqttOnline(
+          true
+        )
 
 
         // =============================================
-        // SUBSCREVER AO TÓPICO
+        // SUBSCREVER TELEMETRIA
         // =============================================
 
-        clienteMqtt.subscribe(
-          TOPICO_RASTREAMENTO,
+        client.subscribe(
+          MQTT_TOPIC_TELEMETRIA,
+          {
+            qos: 0,
+          },
           error => {
 
             if (error) {
 
-              emitirLog(
-                'critical',
-                `Erro ao subscrever: ${error.message}`
-              );
+              console.error(
+                'Erro ao subscrever telemetria:',
+                error
+              )
 
-              return;
+              return
+
             }
 
 
-            emitirLog(
-              'success',
-              `Subscrito em ${TOPICO_RASTREAMENTO}`
-            );
+            console.log(
+              'Subscrito:',
+              MQTT_TOPIC_TELEMETRIA
+            )
 
           }
-        );
+        )
 
       }
-    );
+    )
 
 
     // =================================================
-    // RECEBER MENSAGENS
+    // MESSAGE
     // =================================================
 
-    clienteMqtt.on(
+    client.on(
       'message',
       (
-        topico,
+        topic,
         payload
       ) => {
 
+        if (
+          !montadoRef.current
+        ) {
+
+          return
+
+        }
+
+
         // =============================================
-        // VERIFICAR TÓPICO
+        // ACEITAR APENAS TELEMETRIA
         // =============================================
 
         if (
-          topico !==
-          TOPICO_RASTREAMENTO
+          topic !==
+          MQTT_TOPIC_TELEMETRIA
         ) {
-          return;
+
+          return
+
         }
+
+
+        // =============================================
+        // PAYLOAD
+        // =============================================
+
+        const texto =
+          payload.toString()
+
+
+        console.log(
+          'MQTT recebido:',
+          texto
+        )
+
+
+        // =============================================
+        // JSON
+        // =============================================
+
+        let dados: Record<string, unknown>
 
 
         try {
 
-          // ===========================================
-          // CONVERTER PAYLOAD
-          // ===========================================
-
-          const mensagem =
-            payload.toString();
-
-
-          console.log(
-            'MQTT recebido:',
-            mensagem
-          );
-
-
-          // ===========================================
-          // CONVERTER JSON
-          // ===========================================
-
-          const dados =
+          dados =
             JSON.parse(
-              mensagem
-            );
+              texto
+            )
 
-
-          // ===========================================
-          // VALIDAR ID
-          // ===========================================
-
-          if (
-            !dados.id
-          ) {
-
-            emitirLog(
-              'warning',
-              'Mensagem recebida sem ID.'
-            );
-
-            return;
-          }
-
-
-          // ===========================================
-          // CONVERTER COORDENADAS
-          // ===========================================
-
-          const latitude =
-            Number(
-              dados.latitude
-            );
-
-          const longitude =
-            Number(
-              dados.longitude
-            );
-
-
-          // ===========================================
-          // VALIDAR GPS
-          // ===========================================
-
-          if (
-            !Number.isFinite(latitude) ||
-            !Number.isFinite(longitude)
-          ) {
-
-            emitirLog(
-              'warning',
-              'Coordenadas GPS inválidas.'
-            );
-
-            return;
-          }
-
-
-          // ===========================================
-          // TIMESTAMP
-          // ===========================================
-
-          const timestamp = Date.now();
-
-          const objetoAtualizado:
-            ObjetoRastreado = {
-
-            id:
-              String(
-                dados.id
-              ),
-
-            nome:
-              dados.nome
-                ? String(
-                    dados.nome
-                  )
-                : `Objeto ${dados.id}`,
-
-            latitude,
-
-            longitude,
-
-            velocidade:
-              Number(
-                dados.velocidade ?? 0
-              ),
-
-            direcao:
-              Number(
-                dados.direcao ?? 0
-              ),
-
-            bateria:
-              Number(
-                dados.bateria ?? 0
-              ),
-
-            precisao:
-              Number(
-                dados.precisao ?? 0
-              ),
-
-            online:
-              true,
-
-            ultimaAtualizacao:
-              new Date(
-                timestamp
-              ).toLocaleTimeString(
-                'pt-PT',
-                {
-                  hour12: false,
-                }
-              ),
-
-            timestamp,
-
-          };
-
-
-          // =================================================
-          // ATUALIZAR OBJETOS
-          // =================================================
-
-          setObjetos(
-            anteriores => {
-
-              const objetoExiste =
-                anteriores.some(
-                  objeto =>
-                    objeto.id ===
-                    objetoAtualizado.id
-                );
-
-
-              // ============================================
-              // NOVO OBJETO
-              // ============================================
-
-              if (
-                !objetoExiste
-              ) {
-
-                emitirLog(
-                  'success',
-                  `${objetoAtualizado.nome} entrou no sistema.`
-                );
-
-
-                return [
-                  ...anteriores,
-                  objetoAtualizado,
-                ];
-
-              }
-
-
-              // ============================================
-              // ATUALIZAR OBJETO EXISTENTE
-              // ============================================
-
-              return anteriores.map(
-                objeto =>
-
-                  objeto.id ===
-                  objetoAtualizado.id
-
-                    ? objetoAtualizado
-
-                    : objeto
-              );
-
-            }
-          );
-
-        }
-
-        catch (erro) {
+        } catch (erro) {
 
           console.error(
-            'Erro ao processar MQTT:',
+            'JSON MQTT inválido:',
             erro
-          );
+          )
 
-
-          emitirLog(
-            'critical',
-            'Erro ao interpretar os dados recebidos pelo MQTT.'
-          );
+          return
 
         }
 
+
+        // =============================================
+        // ID
+        // =============================================
+
+        if (
+          !dados.id
+        ) {
+
+          console.warn(
+            'Mensagem sem ID:',
+            dados
+          )
+
+          return
+
+        }
+
+
+        const id =
+          String(
+            dados.id
+          )
+
+
+        // =============================================
+        // DADOS NUMÉRICOS
+        // =============================================
+
+        const latitude =
+          Number(
+            dados.latitude
+          )
+
+
+        const longitude =
+          Number(
+            dados.longitude
+          )
+
+
+        const velocidade =
+          Number(
+            dados.velocidade
+          )
+
+
+        const direcao =
+          Number(
+            dados.direcao
+          )
+
+
+        const bateria =
+          Number(
+            dados.bateria
+          )
+
+
+        const precisao =
+          Number(
+            dados.precisao
+          )
+
+
+        // =============================================
+        // VALIDAR GPS
+        // =============================================
+
+        if (
+          !Number.isFinite(latitude) ||
+          !Number.isFinite(longitude)
+        ) {
+
+          console.warn(
+            'Coordenadas inválidas:',
+            dados
+          )
+
+          return
+
+        }
+
+
+        // =============================================
+        // LIMITES
+        // =============================================
+
+        const limiteNorte =
+          Number(
+            dados.limiteNorte
+          )
+
+
+        const limiteSul =
+          Number(
+            dados.limiteSul
+          )
+
+
+        const limiteOeste =
+          Number(
+            dados.limiteOeste
+          )
+
+
+        const limiteLeste =
+          Number(
+            dados.limiteLeste
+          )
+
+
+        const temArea =
+          Number.isFinite(
+            limiteNorte
+          ) &&
+          Number.isFinite(
+            limiteSul
+          ) &&
+          Number.isFinite(
+            limiteOeste
+          ) &&
+          Number.isFinite(
+            limiteLeste
+          )
+
+
+        // =============================================
+        // DENTRO DA ÁREA
+        // =============================================
+
+        let dentroDaArea =
+          true
+
+
+        if (
+          temArea
+        ) {
+
+          const valorRecebido =
+            dados.dentroDaArea
+
+
+          if (
+            typeof valorRecebido ===
+            'boolean'
+          ) {
+
+            dentroDaArea =
+              valorRecebido
+
+          } else {
+
+            dentroDaArea =
+              latitude >= limiteSul &&
+              latitude <= limiteNorte &&
+              longitude >= limiteOeste &&
+              longitude <= limiteLeste
+
+          }
+
+        }
+
+
+        // =============================================
+        // ATUALIZAR ÁREA
+        // =============================================
+
+        if (
+          temArea
+        ) {
+
+          setAreaPermitida({
+
+            norte:
+              limiteNorte,
+
+            sul:
+              limiteSul,
+
+            oeste:
+              limiteOeste,
+
+            leste:
+              limiteLeste,
+
+          })
+
+        }
+
+
+        // =============================================
+        // SOS
+        // =============================================
+        //
+        // O ESP32 deve enviar:
+        //
+        // "sos": 1
+        //
+        // ou:
+        //
+        // "sos": 0
+        //
+        // Também aceitamos boolean.
+        //
+        // =============================================
+
+        const sos =
+          dados.sos === true ||
+          dados.sos === 1 ||
+          dados.sos === '1' ||
+          dados.sos === 'true'
+
+
+        // =============================================
+        // MARCAR RECEBIMENTO
+        // =============================================
+        //
+        // IMPORTANTE:
+        //
+        // Não usamos dados.timestamp para calcular
+        // online/offline porque o timestamp do ESP32
+        // pode ser millis().
+        //
+        // Usamos o relógio do navegador.
+        //
+        // =============================================
+
+        const agora =
+          Date.now()
+
+
+        ultimoRecebimentoRef.current[id] =
+          agora
+
+
+        // =============================================
+        // HORA
+        // =============================================
+
+        const ultimaAtualizacao =
+          new Date(
+            agora
+          ).toLocaleTimeString(
+            'pt-PT'
+          )
+
+
+        // =============================================
+        // TIMESTAMP
+        // =============================================
+
+        const timestamp =
+          Number(
+            dados.timestamp
+          )
+
+
+        // =============================================
+        // NOVO OBJETO
+        // =============================================
+
+        const novoObjeto:
+          ObjetoRastreado = {
+
+          id,
+
+          nome:
+            dados.nome
+              ? String(
+                  dados.nome
+                )
+              : id,
+
+
+          latitude,
+
+          longitude,
+
+
+          velocidade:
+            Number.isFinite(
+              velocidade
+            )
+              ? velocidade
+              : 0,
+
+
+          direcao:
+            Number.isFinite(
+              direcao
+            )
+              ? direcao
+              : 0,
+
+
+          bateria:
+            Number.isFinite(
+              bateria
+            )
+              ? bateria
+              : 0,
+
+
+          precisao:
+            Number.isFinite(
+              precisao
+            )
+              ? precisao
+              : 0,
+
+
+          limiteNorte:
+            temArea
+              ? limiteNorte
+              : 0,
+
+
+          limiteSul:
+            temArea
+              ? limiteSul
+              : 0,
+
+
+          limiteOeste:
+            temArea
+              ? limiteOeste
+              : 0,
+
+
+          limiteLeste:
+            temArea
+              ? limiteLeste
+              : 0,
+
+
+          dentroDaArea,
+
+
+          // =========================================
+          // SOS DO ESP32
+          // =========================================
+
+          sos,
+
+
+          // =========================================
+          // TIMESTAMP
+          // =========================================
+
+          timestamp:
+            Number.isFinite(
+              timestamp
+            )
+              ? timestamp
+              : 0,
+
+
+          // =========================================
+          // ONLINE
+          // =========================================
+
+          online:
+            true,
+
+
+          ultimaAtualizacao,
+
+        }
+
+
+        // =============================================
+        // ATUALIZAR OBJETOS
+        // =============================================
+
+        setObjetos(
+          listaAnterior => {
+
+            const indice =
+              listaAnterior.findIndex(
+                objeto =>
+                  objeto.id === id
+              )
+
+
+            // =========================================
+            // NOVO
+            // =========================================
+
+            if (
+              indice === -1
+            ) {
+
+              return [
+                ...listaAnterior,
+                novoObjeto,
+              ]
+
+            }
+
+
+            // =========================================
+            // EXISTENTE
+            // =========================================
+
+            const novaLista =
+              [
+                ...listaAnterior,
+              ]
+
+
+            novaLista[indice] =
+              novoObjeto
+
+
+            return novaLista
+
+          }
+        )
+
       }
-    );
+    )
 
 
     // =================================================
-    // MQTT OFFLINE
+    // ERROR
     // =================================================
 
-    clienteMqtt.on(
-      'offline',
-      () => {
-
-        setMqttOnline(false);
-
-
-        emitirLog(
-          'warning',
-          'MQTT offline.'
-        );
-
-      }
-    );
-
-
-    // =================================================
-    // RECONEXÃO
-    // =================================================
-
-    clienteMqtt.on(
-      'reconnect',
-      () => {
-
-        emitirLog(
-          'info',
-          'A reconectar ao Broker EMQX...'
-        );
-
-      }
-    );
-
-
-    // =================================================
-    // ERRO MQTT
-    // =================================================
-
-    clienteMqtt.on(
+    client.on(
       'error',
       erro => {
 
-        setMqttOnline(false);
-
-
-        emitirLog(
-          'critical',
-          `Erro MQTT: ${erro.message}`
-        );
+        console.error(
+          'Erro MQTT:',
+          erro
+        )
 
       }
-    );
+    )
 
 
     // =================================================
-    // LIMPEZA
+    // OFFLINE
+    // =================================================
+
+    client.on(
+      'offline',
+      () => {
+
+        console.warn(
+          'MQTT offline'
+        )
+
+
+        if (
+          montadoRef.current
+        ) {
+
+          setMqttOnline(
+            false
+          )
+
+        }
+
+      }
+    )
+
+
+    // =================================================
+    // RECONNECT
+    // =================================================
+
+    client.on(
+      'reconnect',
+      () => {
+
+        console.log(
+          'MQTT tentando reconectar...'
+        )
+
+      }
+    )
+
+
+    // =================================================
+    // CLOSE
+    // =================================================
+
+    client.on(
+      'close',
+      () => {
+
+        console.warn(
+          'MQTT fechado'
+        )
+
+
+        if (
+          montadoRef.current
+        ) {
+
+          setMqttOnline(
+            false
+          )
+
+        }
+
+      }
+    )
+
+
+    // =================================================
+    // CLEANUP
     // =================================================
 
     return () => {
 
-      clienteMqtt.end(
-        true
-      );
+      montadoRef.current =
+        false
 
 
-      clienteMqttRef.current =
-        null;
-
-    };
-
-  }, [emitirLog]);
+      console.log(
+        'Encerrando MQTT...'
+      )
 
 
-  // =====================================================
-  // VERIFICAR OBJETOS OFFLINE
-  // =====================================================
+      if (
+        mqttRef.current
+      ) {
+
+        mqttRef.current.end(
+          true
+        )
+
+        mqttRef.current =
+          null
+
+      }
+
+    }
+
+  }, [])
+
+
+  // ===================================================
+  // VERIFICAR ONLINE/OFFLINE
+  // ===================================================
 
   useEffect(() => {
 
     const intervalo =
-      setInterval(
+      window.setInterval(
         () => {
 
           const agora =
-            Date.now();
+            Date.now()
 
 
           setObjetos(
-            anteriores =>
+            listaAnterior => {
 
-              anteriores.map(
-                objeto => {
-
-                  const diferenca =
-                    agora -
-                    objeto.timestamp;
+              let alterou =
+                false
 
 
-                  return {
+              const novaLista =
+                listaAnterior.map(
+                  objeto => {
 
-                    ...objeto,
+                    const ultimoRecebimento =
+                      ultimoRecebimentoRef.current[
+                        objeto.id
+                      ] ?? 0
 
-                    online:
-                      diferenca < 30000,
 
-                  };
+                    const online =
+                      (
+                        agora -
+                        ultimoRecebimento
+                      ) <
+                      TEMPO_OFFLINE
 
-                }
-              )
-          );
+
+                    if (
+                      online !==
+                      objeto.online
+                    ) {
+
+                      alterou =
+                        true
+
+                    }
+
+
+                    return {
+
+                      ...objeto,
+
+                      online,
+
+                    }
+
+                  }
+                )
+
+
+              return alterou
+                ? novaLista
+                : listaAnterior
+
+            }
+          )
 
         },
-
-        5000
-      );
+        2000
+      )
 
 
     return () => {
 
-      clearInterval(
+      window.clearInterval(
         intervalo
-      );
+      )
 
-    };
+    }
 
-  }, []);
+  }, [])
 
 
-  // =====================================================
-  // RETORNO DO HOOK
-  // =====================================================
+  // ===================================================
+  // ENVIAR SOS
+  // ===================================================
+  //
+  // O BOTÃO VIRTUAL CHAMA:
+  //
+  // enviarSOS('OBJ001')
+  //
+  // E O NAVEGADOR ENVIA:
+  //
+  // {
+  //   "id": "OBJ001",
+  //   "sos": 1
+  // }
+  //
+  // O ESP32 recebe esse comando.
+  //
+  // O ESP32 é responsável por gerar:
+  //
+  // sos = 1
+  //
+  // e depois:
+  //
+  // sos = 0
+  //
+  // Portanto NÃO mantemos um SOS artificial
+  // no navegador.
+  //
+  // ===================================================
+
+  const enviarSOS =
+    useCallback(
+      (
+        objetoId: string
+      ): boolean => {
+
+        const client =
+          mqttRef.current
+
+
+        // =============================================
+        // VERIFICAR MQTT
+        // =============================================
+
+        if (
+          !client ||
+          !client.connected
+        ) {
+
+          console.error(
+            'Não é possível enviar SOS: MQTT offline.'
+          )
+
+          return false
+
+        }
+
+
+        // =============================================
+        // COMANDO
+        // =============================================
+
+        const comando = {
+
+          id:
+            objetoId,
+
+          sos:
+            1,
+
+        }
+
+
+        // =============================================
+        // JSON
+        // =============================================
+
+        const payload =
+          JSON.stringify(
+            comando
+          )
+
+
+        console.log(
+          'ENVIANDO SOS:',
+          payload
+        )
+
+
+        // =============================================
+        // PUBLICAR
+        // =============================================
+
+        client.publish(
+          MQTT_TOPIC_COMANDO,
+          payload,
+          {
+            qos: 0,
+            retain: false,
+          },
+          erro => {
+
+            if (
+              erro
+            ) {
+
+              console.error(
+                'Erro ao enviar SOS:',
+                erro
+              )
+
+              return
+
+            }
+
+
+            console.log(
+              'SOS enviado com sucesso.'
+            )
+
+          }
+        )
+
+
+        return true
+
+      },
+      []
+    )
+
+
+  // ===================================================
+  // RETORNO
+  // ===================================================
 
   return {
 
     objetos,
 
+    areaPermitida,
+
     mqttOnline,
 
-    logs,
+    enviarSOS,
 
-  };
+  }
 
 }
