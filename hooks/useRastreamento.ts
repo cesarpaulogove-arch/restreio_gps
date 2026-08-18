@@ -71,7 +71,7 @@ export interface AreaPermitida {
 // =====================================================
 
 const MQTT_URL =
-  'ws://broker.emqx.io:8083/mqtt'
+  'wss://broker.emqx.io:8084/mqtt'
 
 
 // =====================================================
